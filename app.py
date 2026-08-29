@@ -10,12 +10,12 @@ from src.database import AuditStore
 from src.matcher import reconcile
 from src.metrics import calculate_metrics
 from src.report_generator import csv_bytes, summary_bytes
+from src.ui import decision_card, inject_theme, render_hero, render_workflow, section_header, style_chart
 from src.validator import validate_batch
 
 
-load_dotenv(); st.set_page_config(page_title="ReconcileAI", page_icon="₹", layout="wide")
-st.title("ReconcileAI")
-st.caption("Intelligent Payment Reconciliation and Exception Assistant · Synthetic-data demonstration")
+load_dotenv(); st.set_page_config(page_title="ReconcileAI", page_icon="₹", layout="wide", initial_sidebar_state="expanded")
+inject_theme(); render_hero(); render_workflow()
 
 
 def load_csv(upload, fallback):
@@ -23,6 +23,9 @@ def load_csv(upload, fallback):
 
 
 with st.sidebar:
+    st.markdown("## ReconcileAI Console")
+    st.caption("CONTROL LAYER · SYNTHETIC DEMO")
+    st.markdown("---")
     st.header("Data source")
     st.session_state.setdefault("data_mode", "demo")
     if st.button("Load bundled demo data", width="stretch"): st.session_state.data_mode = "demo"
@@ -68,9 +71,9 @@ if "results" not in st.session_state:
     st.stop()
 
 results, metrics = st.session_state.results, st.session_state.metrics
-tabs = st.tabs(["Overview", "Results", "Exception Assistant", "Analytics", "Audit Log & Export"])
+tabs = st.tabs(["◆ Overview", "▦ Results", "✦ Exception Assistant", "◈ Analytics", "⌁ Audit & Export"])
 with tabs[0]:
-    st.write("ReconcileAI compares synthetic merchant orders, gateway payments, and settlements using transparent deterministic rules. AI is limited to explanations and safe recommendations.")
+    section_header("Batch intelligence", "A complete financial control surface", "Every metric below is calculated from the current reconciliation output. AI is limited to explanations and safe recommendations.")
     cols = st.columns(4)
     cols[0].metric("Records processed", metrics["total_records"]); cols[1].metric("Matched", metrics["matched_records"])
     cols[2].metric("Exceptions", metrics["exception_records"]); cols[3].metric("Match rate", f'{metrics["match_rate"]:.1%}')
@@ -83,22 +86,37 @@ with tabs[0]:
         with st.expander(f"{name.title()} validation"): st.write({"fatal_errors": report.fatal_errors, "row_errors": report.row_errors, "warnings": report.warnings})
     if st.session_state.validation.warnings: st.warning(" · ".join(st.session_state.validation.warnings))
 with tabs[1]:
+    section_header("Reconciliation ledger", "Search every deterministic decision", "Filter classifications or search across identifiers, checks, and human-readable reasons.")
     category = st.multiselect("Classification", sorted(results.primary_classification.unique()))
     query = st.text_input("Search identifiers or reasons")
     shown = results[results.primary_classification.isin(category)] if category else results
     if query: shown = shown[shown.astype(str).apply(lambda row: row.str.contains(query, case=False).any(), axis=1)]
-    st.dataframe(shown, width="stretch", hide_index=True)
+    st.dataframe(
+        shown,
+        width="stretch",
+        height=540,
+        hide_index=True,
+        column_config={
+            "order_amount": st.column_config.NumberColumn("Order amount", format="₹ %.2f"),
+            "paid_amount": st.column_config.NumberColumn("Paid amount", format="₹ %.2f"),
+            "expected_settlement": st.column_config.NumberColumn("Expected settlement", format="₹ %.2f"),
+            "actual_settlement": st.column_config.NumberColumn("Actual settlement", format="₹ %.2f"),
+            "confidence": st.column_config.ProgressColumn("Rule confidence", min_value=0, max_value=1, format="percent"),
+        },
+    )
 with tabs[2]:
+    section_header("Exception intelligence", "Understand the evidence before acting", "Inspect original rows, deterministic checks, financial impact, and a bounded explanation. Cases always remain human-controlled.")
     exceptions = results[results.primary_classification != "MATCHED"]
     if exceptions.empty: st.success("No exceptions require review.")
     else:
         oid = st.selectbox("Select an exception", exceptions.order_id)
         selected = exceptions[exceptions.order_id == oid].iloc[0].to_dict()
-        st.subheader("Deterministic decision"); st.json(selected)
+        decision_card(selected)
+        with st.expander("View complete deterministic evidence"): st.json(selected)
         status = "Open — human review required" if selected["primary_classification"] != "MATCHED" else "No review required"
-        st.metric("Manual-review status", status)
+        st.warning(f"Manual-review status: {status}")
         frames = st.session_state.frames
-        st.subheader("Original source records")
+        section_header("Source evidence", "Original transaction records", "These source rows are displayed exactly as supplied and are never modified by the assistant.")
         st.write("Order"); st.dataframe(frames["orders"][frames["orders"].order_id.astype(str) == str(oid)], hide_index=True, width="stretch")
         source_payments = frames["payments"][frames["payments"].order_id.astype(str) == str(oid)]
         st.write("Payments"); st.dataframe(source_payments, hide_index=True, width="stretch")
@@ -116,19 +134,23 @@ with tabs[2]:
             if not outcome["ai_available"]: st.info("Gemini assistance is unavailable; this is the deterministic fallback explanation.")
         st.warning("Recommendations are advisory. ReconcileAI never moves money or marks a case resolved.")
 with tabs[3]:
+    section_header("Control analytics", "See where reconciliation risk concentrates", "These charts focus on exception volume, affected value, payment mix, and settlement timing—not decorative metrics.")
     counts = results.primary_classification.value_counts().rename_axis("classification").reset_index(name="count")
-    st.plotly_chart(px.bar(counts, x="classification", y="count", title="Records by classification"), width="stretch")
     match_summary = results.assign(outcome=results.primary_classification.eq("MATCHED").map({True: "Matched", False: "Exception"})).outcome.value_counts().rename_axis("outcome").reset_index(name="count")
-    st.plotly_chart(px.pie(match_summary, names="outcome", values="count", title="Matched versus exceptions"), width="stretch")
+    chart_left, chart_right = st.columns(2)
+    with chart_left: st.plotly_chart(style_chart(px.bar(counts, x="classification", y="count", color="classification", title="Records by classification")), width="stretch")
+    with chart_right: st.plotly_chart(style_chart(px.pie(match_summary, names="outcome", values="count", hole=.58, title="Matched versus exceptions")), width="stretch")
     affected = results[results.primary_classification != "MATCHED"].groupby("primary_classification", as_index=False).order_amount.sum()
-    st.plotly_chart(px.bar(affected, x="primary_classification", y="order_amount", title="Financial amount affected by category", labels={"order_amount": "Amount (₹)"}), width="stretch")
     payment_methods = st.session_state.frames["payments"].payment_method.value_counts().rename_axis("payment_method").reset_index(name="count")
-    st.plotly_chart(px.bar(payment_methods, x="payment_method", y="count", title="Payment-method distribution"), width="stretch")
+    chart_left, chart_right = st.columns(2)
+    with chart_left: st.plotly_chart(style_chart(px.bar(affected, x="primary_classification", y="order_amount", color="primary_classification", title="Financial amount affected by category", labels={"order_amount": "Amount (₹)"})), width="stretch")
+    with chart_right: st.plotly_chart(style_chart(px.bar(payment_methods, x="payment_method", y="count", color="payment_method", title="Payment-method distribution")), width="stretch")
     delay_data = st.session_state.frames["payments"].merge(st.session_state.frames["settlements"], on="payment_id", how="inner")
     delay_data["settlement_delay_days"] = (pd.to_datetime(delay_data.settlement_date, errors="coerce") - pd.to_datetime(delay_data.payment_date, errors="coerce")).dt.total_seconds() / 86400
     delay_data = delay_data[delay_data.settlement_delay_days.notna() & delay_data.settlement_delay_days.ge(0)]
-    st.plotly_chart(px.histogram(delay_data, x="settlement_delay_days", title="Settlement-delay distribution", labels={"settlement_delay_days": "Delay (days)"}), width="stretch")
+    st.plotly_chart(style_chart(px.histogram(delay_data, x="settlement_delay_days", color_discrete_sequence=["#6ee7f9"], title="Settlement-delay distribution", labels={"settlement_delay_days": "Delay (days)"})), width="stretch")
 with tabs[4]:
+    section_header("Audit fabric", "Trace and export every decision", "The current batch is isolated by batch ID. AI events contain sanitized status codes and never store credentials or raw exceptions.")
     store = AuditStore(); audit = store.read_batch(st.session_state.batch); st.dataframe(audit, width="stretch", hide_index=True)
     with st.expander("AI assistance events"): st.dataframe(store.read_ai_events(st.session_state.batch), width="stretch", hide_index=True)
     c1, c2, c3, c4 = st.columns(4)

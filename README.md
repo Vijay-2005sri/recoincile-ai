@@ -15,6 +15,7 @@ Manual spreadsheet comparison is slow, error-prone, hard to reproduce, and diffi
 ## 4. Features
 
 - Load 180 bundled synthetic orders or upload CSV files.
+- Navigate a responsive, dimensional glass interface with accessible reduced-motion support.
 - Validate schemas, identifiers, amounts, dates, statuses, currencies, duplicates, ordering, and orphan references.
 - Reconcile orders to payments and captured payments to settlements with a configurable ₹0.50 tolerance.
 - Inspect primary and secondary issues, passed and failed rules, reasons, confidence, and original source rows.
@@ -24,7 +25,7 @@ Manual spreadsheet comparison is slow, error-prone, hard to reproduce, and diffi
 
 ## 5. Architecture
 
-CSV inputs pass through structured validation, deterministic matching, metrics, SQLite auditing, and Streamlit presentation. See [docs/architecture.md](docs/architecture.md) for the Mermaid diagram and component responsibilities.
+CSV inputs pass through structured validation, deterministic matching, metrics, SQLite auditing, and a reusable Streamlit presentation layer in `src/ui.py`. See [docs/architecture.md](docs/architecture.md) for the Mermaid diagram and component responsibilities.
 
 ## 6. Reconciliation workflow
 
