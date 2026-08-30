@@ -15,7 +15,8 @@ Manual spreadsheet comparison is slow, error-prone, hard to reproduce, and diffi
 ## 4. Features
 
 - Load 180 bundled synthetic orders or upload CSV files.
-- Navigate a responsive, dimensional glass interface with accessible reduced-motion support.
+- Operate from a responsive fintech command centre with a compact navigation rail, live metrics, exception radar, and a local Three.js reconciliation scene with real 3D nodes, curved volume-scaled tubes, directional arrows, and moving flow particles.
+- Switch between tokenized dark and light themes; normal text and status-label pairings are checked against the WCAG AA 4.5:1 contrast threshold.
 - Validate schemas, identifiers, amounts, dates, statuses, currencies, duplicates, ordering, and orphan references.
 - Reconcile orders to payments and captured payments to settlements with a configurable ₹0.50 tolerance.
 - Inspect primary and secondary issues, passed and failed rules, reasons, confidence, and original source rows.
@@ -25,7 +26,7 @@ Manual spreadsheet comparison is slow, error-prone, hard to reproduce, and diffi
 
 ## 5. Architecture
 
-CSV inputs pass through structured validation, deterministic matching, metrics, SQLite auditing, and a reusable Streamlit presentation layer in `src/ui.py`. See [docs/architecture.md](docs/architecture.md) for the Mermaid diagram and component responsibilities.
+CSV inputs pass through structured validation, deterministic matching, metrics, SQLite auditing, and a reusable Streamlit command-centre layer in `src/ui.py`. The interface separates Data Intake, Reconciliation, Exceptions, Analytics, Audit Trail, and Export while keeping current batch status visible. See [docs/architecture.md](docs/architecture.md) for the Mermaid diagram and component responsibilities.
 
 ## 6. Reconciliation workflow
 
