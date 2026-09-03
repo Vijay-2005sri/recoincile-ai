@@ -60,5 +60,7 @@ def test_three_scene_contains_true_webgl_flow_primitives():
     script = (_FRONTEND / "scene.js").read_text(encoding="utf-8")
     for primitive in ("THREE.IcosahedronGeometry", "THREE.TubeGeometry", "THREE.CatmullRomCurve3", "THREE.PerspectiveCamera", "THREE.PointLight", "requestAnimationFrame"):
         assert primitive in script
-    assert "Tube width represents record volume" in html
+    assert "Tube width represents volume" in html
+    for stage in ("Payment failed", "AI diagnosis", "Risk classification", "Recovery strategy", "Recovery action", "Recovered / escalated / stopped"):
+        assert stage in script
     assert (_FRONTEND / "vendor" / "three.module.min.js").is_file()
