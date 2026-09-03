@@ -14,18 +14,18 @@ from src.three_scene import reconciliation_scene
 # custom property, and programmatic renderers receive this same map.
 THEME_TOKENS: dict[str, dict[str, str]] = {
     "Dark": {
-        "bg-canvas": "#0B1118", "bg-sidebar": "#101923", "bg-grid": "#1A2A36",
-        "surface-1": "#121E2A", "surface-2": "#192837", "surface-3": "#223545", "surface-inverse": "#071018",
-        "border-subtle": "#2A3C4C", "border-strong": "#4B6980",
-        "text-primary": "#F8FAFC", "text-secondary": "#CBD5E1", "text-muted": "#9AAABD", "text-inverse": "#071018", "text-on-action": "#071018",
-        "accent-info": "#61D4FF", "accent-info-soft": "#12394B", "accent-action": "#58C7E8",
-        "status-success": "#56E0B7", "status-success-soft": "#123B34", "status-warning": "#FFD166", "status-warning-soft": "#453519",
-        "status-critical": "#FF8FA3", "status-critical-soft": "#48212B", "status-review": "#C9B7FF", "status-review-soft": "#362B5A",
-        "focus": "#8DE7FF", "shadow-color": "#03070B",
-        "scene-canvas": "#07131D", "scene-grid": "#325163", "scene-outline": "#507186", "scene-light-top": "#A5F3FC", "scene-light-bottom": "#102433", "scene-particle": "#F8FAFC",
-        "scene-node-success": "#56E0B7", "scene-node-warning": "#FFD166", "scene-node-critical": "#FF8FA3", "scene-node-review": "#C9B7FF",
-        "scene-label-success": "#56E0B7", "scene-label-warning": "#FFD166", "scene-label-critical": "#FF8FA3", "scene-label-review": "#C9B7FF",
-        "chart-grid": "#304353", "chart-paper": "#121E2A", "chart-hover": "#21313F",
+        "bg-canvas": "#020617", "bg-sidebar": "#0F172A", "bg-grid": "#1E293B",
+        "surface-1": "#0E1223", "surface-2": "#111827", "surface-3": "#1E293B", "surface-inverse": "#020617",
+        "border-subtle": "#334155", "border-strong": "#475569",
+        "text-primary": "#F8FAFC", "text-secondary": "#CBD5E1", "text-muted": "#94A3B8", "text-inverse": "#020617", "text-on-action": "#020617",
+        "accent-info": "#38BDF8", "accent-info-soft": "#0C4A6E", "accent-action": "#22C55E",
+        "status-success": "#22C55E", "status-success-soft": "#133B2C", "status-warning": "#F59E0B", "status-warning-soft": "#472C0A",
+        "status-critical": "#EF4444", "status-critical-soft": "#4A151A", "status-review": "#A78BFA", "status-review-soft": "#2E2155",
+        "focus": "#FFFFFF", "shadow-color": "#01030A",
+        "scene-canvas": "#020617", "scene-grid": "#334155", "scene-outline": "#475569", "scene-light-top": "#CFFAFE", "scene-light-bottom": "#0F172A", "scene-particle": "#F8FAFC",
+        "scene-node-success": "#22C55E", "scene-node-warning": "#F59E0B", "scene-node-critical": "#EF4444", "scene-node-review": "#A78BFA",
+        "scene-label-success": "#4ADE80", "scene-label-warning": "#FCD34D", "scene-label-critical": "#FDA4AF", "scene-label-review": "#C4B5FD",
+        "chart-grid": "#334155", "chart-paper": "#0E1223", "chart-hover": "#1E293B",
     },
     "Light": {
         "bg-canvas": "#F7F8FA", "bg-sidebar": "#FFFFFF", "bg-grid": "#D6E2E8",
@@ -63,13 +63,14 @@ def inject_theme(motion_enabled: bool = True, theme_mode: str = "Dark") -> None:
     css = dedent(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600;700;800&display=swap');
         :root { __TOKENS__ --radius:16px; --tone:var(--accent-info); }
-        html,body,[class*="css"] { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+        html,body,[class*="css"] { font-family:"Fira Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
         .stApp h1,.stApp h2,.stApp h3,.stApp h4,.stApp h5,.stApp h6,[data-testid="stMarkdownContainer"] { color:var(--text-primary); } [data-testid="stCaptionContainer"] { color:var(--text-muted)!important; }
-        .stApp { color:var(--text-primary); background:radial-gradient(circle at 54% 12%,var(--accent-info-soft),transparent 31rem),linear-gradient(145deg,var(--bg-canvas),var(--surface-2)); }
+        .stApp { color:var(--text-primary); background:radial-gradient(circle at 54% 12%,color-mix(in srgb,var(--accent-info-soft) 52%,transparent),transparent 31rem),linear-gradient(145deg,var(--bg-canvas),var(--surface-2)); }
         .stApp::before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.32; background-image:linear-gradient(var(--bg-grid) 1px,transparent 1px),linear-gradient(90deg,var(--bg-grid) 1px,transparent 1px); background-size:48px 48px; mask-image:linear-gradient(to bottom,transparent,var(--surface-inverse) 18%,var(--surface-inverse) 84%,transparent); transform:perspective(900px) rotateX(62deg) scale(1.55) translateY(17%); transform-origin:center bottom; }
         [data-testid="stAppViewContainer"]>.main { position:relative; z-index:1; }.block-container { max-width:1920px; padding:4.15rem clamp(1.65rem,3vw,4rem) 2.25rem; }
-        #MainMenu,[data-testid="stToolbar"],[data-testid="stDecoration"],footer { display:none!important; } [data-testid="stHeader"] { height:0; background:transparent; }
+        #MainMenu,[data-testid="stToolbar"],[data-testid="stDecoration"],footer { display:none!important; } [data-testid="stHeader"] { height:3.5rem; background:transparent; pointer-events:none; } [data-testid="stSidebarCollapsedControl"] { position:fixed!important; z-index:1000!important; top:.72rem; left:.72rem; display:flex!important; pointer-events:auto!important; } [data-testid="stSidebarCollapsedControl"] button { width:2.35rem!important; height:2.35rem!important; min-height:2.35rem!important; padding:0!important; border:1px solid var(--border-strong)!important; border-radius:.7rem!important; background:var(--surface-1)!important; color:var(--text-primary)!important; box-shadow:0 .5rem 1.3rem color-mix(in srgb,var(--shadow-color) 18%,transparent)!important; } [data-testid="stSidebarCollapsedControl"] button:hover { border-color:var(--accent-info)!important; background:var(--surface-2)!important; }
 
         [data-testid="stSidebar"],[data-testid="stSidebar"]>div:first-child { width:232px!important; min-width:232px!important; background:var(--bg-sidebar)!important; border-right:1px solid var(--border-subtle); box-shadow:1rem 0 2.8rem color-mix(in srgb,var(--shadow-color) 22%,transparent); }
         [data-testid="stSidebar"]>div:first-child { padding-top:1rem; } [data-testid="stSidebar"],[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] *,[data-testid="stSidebar"] label,[data-testid="stSidebar"] label *,[data-testid="stSidebar"] svg { color:var(--text-primary)!important; }

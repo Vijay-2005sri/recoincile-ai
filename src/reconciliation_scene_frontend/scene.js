@@ -106,7 +106,7 @@ function mountScene(payload, generation) {
     grid.material.opacity = .36;
     world.add(grid);
 
-    const volume = Math.max(count("orders"), count("payments"), count("settlements"), 1);
+    const volume = Math.max(count("failed"), count("diagnosis"), count("risk"), count("strategy"), count("action"), count("outcome"), 1);
     const tubeRadius = (value) => .045 + (.13 * Math.sqrt(Math.max(value, 1) / volume));
     const labels = [];
     const nodes = [];
@@ -115,8 +115,8 @@ function mountScene(payload, generation) {
     function addNode(id, title, subtitle, position, tone, radius, labelTone) {
       const group = new THREE.Group();
       group.position.copy(position);
-      const geometry = id === "verify" ? new THREE.SphereGeometry(radius, 32, 24) : new THREE.IcosahedronGeometry(radius, 2);
-      const material = new THREE.MeshStandardMaterial({ color: tone, emissive: tone, emissiveIntensity: id === "verify" ? .46 : .16, metalness: .48, roughness: .28 });
+      const geometry = id === "diagnosis" ? new THREE.SphereGeometry(radius, 32, 24) : new THREE.IcosahedronGeometry(radius, 2);
+      const material = new THREE.MeshStandardMaterial({ color: tone, emissive: tone, emissiveIntensity: id === "diagnosis" ? .46 : .16, metalness: .48, roughness: .28 });
       const mesh = new THREE.Mesh(geometry, material);
       const halo = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.52, 24, 16), new THREE.MeshBasicMaterial({ color: tone, transparent: true, opacity: .075, depthWrite: false }));
       const ring = new THREE.Mesh(new THREE.TorusGeometry(radius * 1.27, .018, 8, 48), new THREE.MeshBasicMaterial({ color: tone, transparent: true, opacity: .72 }));
@@ -129,12 +129,12 @@ function mountScene(payload, generation) {
     }
 
     const positions = {
-      orders: addNode("orders", "Orders", `${count("orders").toLocaleString()} loaded`, new THREE.Vector3(-5.0, 2.45, .65), colors.source, .62, "info"),
-      payments: addNode("payments", "Payments", `${count("payments").toLocaleString()} linked`, new THREE.Vector3(-5.15, -.15, -1.1), colors.review, .58, "review"),
-      settlements: addNode("settlements", "Settlements", `${count("settlements").toLocaleString()} linked`, new THREE.Vector3(-4.8, -2.65, .35), colors.warning, .58, "warning"),
-      verify: addNode("verify", "Verify core", `${count("orders").toLocaleString()} rules`, new THREE.Vector3(0, 0, 0), colors.source, 1.12, "info"),
-      verified: addNode("verified", "Verified", `${count("verified").toLocaleString()} reconciled`, new THREE.Vector3(5.15, 1.55, .15), colors.success, .68, "success"),
-      exceptions: addNode("exceptions", "Exceptions", `${count("exceptions").toLocaleString()} queued`, new THREE.Vector3(5.1, -2.05, .75), colors.critical, .64, "critical"),
+      failed: addNode("failed", "Payment failed", `${count("failed").toLocaleString()} detected`, new THREE.Vector3(-6.1, .2, .1), colors.critical, .66, "critical"),
+      diagnosis: addNode("diagnosis", "AI diagnosis", `${count("diagnosis").toLocaleString()} analysed`, new THREE.Vector3(-3.7, 2.05, -.7), colors.source, .83, "info"),
+      risk: addNode("risk", "Risk classification", `${count("risk").toLocaleString()} prioritised`, new THREE.Vector3(-1.15, -.55, .55), colors.warning, .72, "warning"),
+      strategy: addNode("strategy", "Recovery strategy", `${count("strategy").toLocaleString()} recommended`, new THREE.Vector3(1.35, 1.7, -.48), colors.review, .76, "review"),
+      action: addNode("action", "Recovery action", `${count("action").toLocaleString()} controlled`, new THREE.Vector3(3.8, -.45, .42), colors.source, .7, "info"),
+      outcome: addNode("outcome", "Recovered / escalated / stopped", `${count("outcome").toLocaleString()} outcomes`, new THREE.Vector3(6.1, 1.15, -.12), colors.success, .82, "success"),
     };
 
     function addFlow(from, to, tone, value, curveLift) {
@@ -156,11 +156,11 @@ function mountScene(payload, generation) {
       flows.push({ curve, particles });
     }
 
-    addFlow(positions.orders, positions.verify, colors.source, count("orders"), .76);
-    addFlow(positions.payments, positions.verify, colors.review, count("payments"), .16);
-    addFlow(positions.settlements, positions.verify, colors.warning, count("settlements"), -.58);
-    addFlow(positions.verify, positions.verified, colors.success, count("verified"), .52);
-    addFlow(positions.verify, positions.exceptions, colors.critical, count("exceptions"), -.38);
+    addFlow(positions.failed, positions.diagnosis, colors.critical, count("failed"), .72);
+    addFlow(positions.diagnosis, positions.risk, colors.source, count("diagnosis"), -.48);
+    addFlow(positions.risk, positions.strategy, colors.warning, count("risk"), .68);
+    addFlow(positions.strategy, positions.action, colors.review, count("strategy"), -.55);
+    addFlow(positions.action, positions.outcome, colors.success, count("outcome"), .58);
 
     function resize() {
       const width = view.clientWidth || 1;
@@ -188,7 +188,7 @@ function mountScene(payload, generation) {
         camera.position.y = 4.6 + Math.cos(elapsed * .14) * .25;
         nodes.forEach(({ id, ring, mesh }, index) => {
           ring.rotation.z = elapsed * (.25 + index * .018);
-          if (id === "verify") mesh.rotation.y = elapsed * .32;
+          if (id === "diagnosis") mesh.rotation.y = elapsed * .32;
         });
         flows.forEach(({ curve, particles }) => particles.forEach((particle) => {
           particle.progress = (particle.progress + particle.speed / 60) % 1;
@@ -223,11 +223,9 @@ function mountScene(payload, generation) {
       renderer.domElement.remove();
     };
   } catch (error) {
-    // Keep diagnostics in the browser console. Do not replace a real 3D scene
-    // with a generic error panel when a supported browser is still mounting.
-    console.error("Reconciliation scene initialization failed", error);
-    loading.hidden = true;
-    view.dataset.sceneState = "failed";
+    // Fail visibly in DevTools instead of shipping an apology panel in place of geometry.
+    console.error("Recovery pipeline initialization failed", error);
+    throw error;
   }
 }
 
@@ -236,7 +234,7 @@ function scheduleSceneMount(payload) {
   cleanupScene();
   cleanupScene = () => {};
   applyTheme(payload.theme);
-  stateBadge.textContent = payload.processing ? "PROCESSING" : "LIVE DATA FLOW";
+  stateBadge.textContent = payload.processing ? "PROCESSING" : "ANALYSIS LIVE";
   loading.hidden = false;
   view.dataset.sceneState = "mounting";
 
@@ -252,10 +250,7 @@ function scheduleSceneMount(payload) {
       requestAnimationFrame(waitForViewport);
       return;
     }
-    // Diagnostic only: the next Streamlit layout render retries mounting.
-    console.error("Reconciliation scene viewport did not receive usable dimensions.");
-    loading.hidden = true;
-    view.dataset.sceneState = "waiting-for-layout";
+    throw new Error("Recovery pipeline viewport did not receive usable dimensions.");
   };
   requestAnimationFrame(waitForViewport);
 }
