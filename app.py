@@ -13,14 +13,17 @@ from dotenv import load_dotenv
 
 from src.ai_explainer import explain
 from src.config import SETTINGS
+from src.currency import format_breakdown, format_money
 from src.database import AuditStore
 from src.matcher import reconcile
 from src.metrics import calculate_metrics
 from src.report_generator import csv_bytes, summary_bytes
+from src.input_data_reviewer import review_input_data
 from src.ui import (
     ai_boundary,
     audit_feed,
     command_bar,
+    data_feed_status,
     decision_card,
     exception_radar,
     inject_theme,
@@ -39,7 +42,7 @@ from src.validator import validate_batch
 
 
 load_dotenv()
-st.set_page_config(page_title="ReconcileAI Command Centre", page_icon="₹", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="ReconcileAI Command Centre", page_icon="R", layout="wide", initial_sidebar_state="expanded")
 
 
 @st.cache_data(show_spinner=False)
@@ -52,7 +55,7 @@ def read_upload(upload) -> pd.DataFrame | None:
 
 
 def clear_batch() -> None:
-    for key in ("results", "metrics", "frames", "batch", "explanations", "last_processed", "validation"):
+    for key in ("results", "metrics", "frames", "batch", "explanations", "last_processed", "validation", "input_review", "flow_active"):
         st.session_state.pop(key, None)
 
 
@@ -98,8 +101,9 @@ def run_reconciliation(frames: dict[str, pd.DataFrame | None], tolerance: float)
         st.error("Reconciliation is blocked: provide orders, payments, and settlements before continuing.")
         return False
     counts = {"orders": len(frames["orders"]), "payments": 0, "settlements": 0, "verified": 0, "exceptions": 0}
+    st.session_state.flow_active = True
     core_placeholder = st.empty()
-    with core_placeholder.container(): reconciliation_core(counts, processing=True)
+    with core_placeholder.container(): reconciliation_core(counts, flow_active=True)
     progress = st.progress(8, text="Reading source manifests…")
     try:
         progress.progress(25, text="Running schema, identifier, and financial validation…")
@@ -109,6 +113,8 @@ def run_reconciliation(frames: dict[str, pd.DataFrame | None], tolerance: float)
             core_placeholder.empty(); progress.empty()
             st.error("Reconciliation blocked by fatal validation errors: " + " | ".join(validation.fatal_errors))
             return False
+        progress.progress(42, text="Running Mistral input-data quality review…")
+        st.session_state.input_review = review_input_data({name: frames[name] for name in ("orders", "payments", "settlements")})
         progress.progress(55, text="Matching orders, payments, and settlements…")
         started = time.perf_counter()
         results = reconcile(frames["orders"], frames["payments"], frames["settlements"], tolerance)
@@ -160,17 +166,18 @@ def selected_result_panel(selected: dict, frames: dict[str, pd.DataFrame]) -> No
         expected = selected.get("expected_settlement")
         actual = selected.get("actual_settlement")
         difference = abs(float(expected) - float(actual)) if expected is not None and actual is not None else None
-        st.metric("Expected settlement", "Unavailable" if expected is None else f"₹{float(expected):,.2f}")
-        st.metric("Actual settlement", "Unavailable" if actual is None else f"₹{float(actual):,.2f}")
-        st.metric("Absolute difference", "Unavailable" if difference is None else f"₹{difference:,.2f}")
+        currency = selected.get("currency", "INR")
+        st.metric("Expected settlement", format_money(expected, currency))
+        st.metric("Actual settlement", format_money(actual, currency))
+        st.metric("Absolute difference", format_money(difference, currency))
         st.info(selected["recommended_action"])
 
 
-for key, default in (("data_mode", "demo"), ("motion_enabled", True), ("theme_mode", "Dark"), ("navigation", "◈ Command Centre")):
+for key, default in (("data_mode", "demo"), ("theme_mode", "Dark"), ("navigation", "◈ Command Centre")):
     st.session_state.setdefault(key, default)
 
 inject_theme(
-    motion_enabled=st.session_state.motion_enabled,
+    motion_enabled=True,
     theme_mode=st.session_state.theme_mode,
 )
 
@@ -179,8 +186,17 @@ with st.sidebar:
     rail_brand()
     navigation = st.radio("Workspace", NAVIGATION, key="navigation", label_visibility="collapsed")
     st.markdown("---")
-    st.segmented_control("Appearance", ("Dark", "Light"), key="theme_mode", width="stretch")
-    st.toggle("Ambient motion", key="motion_enabled", help="Disable non-essential motion while preserving every interaction.")
+    theme_icon = "☾" if st.session_state.theme_mode == "Dark" else "☀"
+    theme_flash = st.session_state.pop("theme_flash", None)
+    with st.container(key="theme_switch_panel"):
+        switch_theme = st.button(theme_icon, key="theme_switch")
+        if theme_flash:
+            st.markdown(f'<span class="theme-mode-flash">{theme_flash}</span>', unsafe_allow_html=True)
+    if switch_theme:
+        next_theme = "Light" if st.session_state.theme_mode == "Dark" else "Dark"
+        st.session_state.theme_mode = next_theme
+        st.session_state.theme_flash = f"{next_theme} mode"
+        st.rerun()
     st.markdown('<div class="rail-foot"><strong>Synthetic-data demonstration</strong><br>No payments, refunds, or settlements can be initiated from this application.</div>', unsafe_allow_html=True)
 
 results = st.session_state.get("results")
@@ -190,8 +206,8 @@ required_sources = ("orders", "payments", "settlements")
 source_ready = all(active_frames.get(name) is not None for name in required_sources)
 staged_order_count = len(active_frames["orders"]) if active_frames.get("orders") is not None else 0
 missing_sources = [name.title() for name in required_sources if active_frames.get(name) is None]
-ai_key = os.getenv("GEMINI_API_KEY")
-ai_available = bool(ai_key and ai_key != "replace_with_your_own_key")
+gemini_key = os.getenv("GEMINI_API_KEY")
+ai_available = bool(gemini_key and gemini_key != "replace_with_your_own_key")
 system_status = "IDLE" if results is None else "ATTENTION" if (results.primary_classification != "MATCHED").any() else "HEALTHY"
 command_bar(st.session_state.get("batch"), "DEMO" if st.session_state.data_mode == "demo" else "UPLOAD",
             system_status, ai_available, st.session_state.get("last_processed", "Not processed"))
@@ -204,6 +220,11 @@ if navigation == "◈ Command Centre":
     )
     page_heading("Operations overview", "Finance command centre", "Current reconciliation posture, transaction flow, exposure, and real audit activity in one viewport.",
                  source_context)
+    feed_panel, feed_action = st.columns([.82, .18], gap="small", vertical_alignment="center")
+    with feed_panel:
+        data_feed_status(st.session_state.data_mode, active_frames, source_ready, st.session_state.get("last_processed"))
+    with feed_action:
+        st.button("Open Data Intake", key="command_feed_action", on_click=lambda: st.session_state.update(navigation=NAVIGATION[1]))
     if results is None:
         action_col, note_col = st.columns([.28, .72])
         with action_col:
@@ -220,22 +241,22 @@ if navigation == "◈ Command Centre":
         {"label": "Records processed", "value": f'{metrics["total_records"]:,}' if metrics else "—", "note": f'{staged_order_count:,} records staged' if source_ready else "Required sources not staged", "icon": "▤", "tone": "info"},
         {"label": "Match rate", "value": f'{metrics["match_rate"]:.1%}' if metrics else "—", "note": "Clean end-to-end chains", "icon": "✓", "tone": "success"},
         {"label": "Exceptions detected", "value": f'{metrics["exception_records"]:,}' if metrics else "—", "note": "Unresolved human queue", "icon": "!", "tone": "warning"},
-        {"label": "Amount at risk", "value": f'₹{metrics["affected_amount"]:,.0f}' if metrics else "—", "note": "Value associated with exceptions", "icon": "₹", "tone": "critical"},
+        {"label": "Amount at risk", "value": format_breakdown(metrics["affected_amounts_by_currency"], compact=True) if metrics else "—", "note": "Value associated with exceptions", "icon": "¤", "tone": "critical"},
         {"label": "Classification accuracy", "value": "Unavailable" if not metrics or metrics["classification_accuracy"] is None else f'{metrics["classification_accuracy"]:.1%}', "note": "Measured against ground truth", "icon": "◎", "tone": "review"},
     ]
     metric_grid(displayed_metrics)
-    reconciliation_core(current_counts(active_frames, results))
+    reconciliation_core(current_counts(active_frames, results), flow_active=st.session_state.get("flow_active", False))
     operational_left, operational_right = st.columns(2, gap="medium")
     with operational_left:
-        exception_radar(results, metrics["affected_amount"] if metrics else 0)
+        exception_radar(results, metrics["affected_amounts_by_currency"] if metrics else {})
     with operational_right:
         audit_feed(results)
 
 
 elif navigation == "⇩ Data Intake":
     page_heading("Source control", "Data Intake Dock", "Stage the three financial sources, inspect their contracts, validate every row, and release one controlled reconciliation run.", "CSV · UTF-8")
-    choice = st.segmented_control("Source strategy", ("Use demonstration dataset", "Upload custom dataset"),
-                                  default="Use demonstration dataset" if st.session_state.data_mode == "demo" else "Upload custom dataset", width="content")
+    choice = st.selectbox("Source strategy", ("Use demonstration dataset", "Upload custom dataset"),
+                          index=0 if st.session_state.data_mode == "demo" else 1, width=280)
     requested_mode = "demo" if choice == "Use demonstration dataset" else "upload"
     if requested_mode != st.session_state.data_mode:
         st.session_state.data_mode = requested_mode; clear_batch(); st.rerun()
@@ -279,13 +300,19 @@ elif navigation == "⇩ Data Intake":
     with state_col:
         if required_ready: st.caption("All required source manifests are staged. Fatal schema errors will block processing; row issues remain inspectable.")
         else: st.warning("Primary action disabled: upload all three required CSV files.")
-    if reconcile_now: run_reconciliation(staged_frames, SETTINGS.amount_tolerance)
+    if reconcile_now and run_reconciliation(staged_frames, SETTINGS.amount_tolerance): st.rerun()
     if "validation" in st.session_state:
         for name, report in st.session_state.validation.datasets.items():
             if report.fatal_errors or report.row_errors or report.warnings:
                 with st.expander(f"{name.title()} validation evidence"):
                     st.write({"fatal_errors": report.fatal_errors, "row_errors": report.row_errors, "warnings": report.warnings})
         if st.session_state.validation.warnings: st.warning("Cross-file warnings: " + " · ".join(st.session_state.validation.warnings))
+    if "input_review" in st.session_state:
+        review = st.session_state.input_review
+        with st.expander("Mistral input-data review", expanded=review["available"]):
+            st.caption("Advisory review of row counts, columns, and missing-value counts only. Deterministic validation remains authoritative.")
+            st.write(review["summary"])
+            for finding in review["findings"]: st.write("• " + finding)
 
 
 elif navigation == "⇄ Reconciliation":
@@ -295,7 +322,7 @@ elif navigation == "⇄ Reconciliation":
     else:
         severity_series = results.primary_classification.map(severity_for)
         sticky_summary([("Batch", st.session_state.batch[:8]), ("Records", f"{len(results):,}"), ("Matched", f'{metrics["matched_records"]:,}'),
-                        ("Exceptions", f'{metrics["exception_records"]:,}'), ("At risk", f'₹{metrics["affected_amount"]:,.0f}'), ("Accuracy", "Unavailable" if metrics["classification_accuracy"] is None else f'{metrics["classification_accuracy"]:.1%}')])
+                        ("Exceptions", f'{metrics["exception_records"]:,}'), ("At risk", format_breakdown(metrics["affected_amounts_by_currency"], compact=True)), ("Accuracy", "Unavailable" if metrics["classification_accuracy"] is None else f'{metrics["classification_accuracy"]:.1%}')])
         filter_cols = st.columns([1.35, 1, 1, .75, .75])
         query = filter_cols[0].text_input("Search IDs or reason", placeholder="Order, payment, settlement…")
         classifications = filter_cols[1].multiselect("Classification", sorted(results.primary_classification.unique()))
@@ -322,8 +349,8 @@ elif navigation == "⇄ Reconciliation":
         display = filtered.copy()
         display.insert(0, "status", display.severity.map({"Matched": "✓ Matched", "Warning": "△ Warning", "Critical": "✕ Failed", "Manual review": "◇ Manual review"}))
         st.caption(f"Showing {len(display):,} of {len(results):,} records")
-        st.dataframe(display[["status", "order_id", "payment_id", "settlement_id", "primary_classification", "order_amount", "expected_settlement", "actual_settlement", "reason", "confidence"]], width="stretch", height=340, hide_index=True,
-                     column_config={"order_amount": st.column_config.NumberColumn("Order amount", format="₹ %.2f"), "expected_settlement": st.column_config.NumberColumn("Expected", format="₹ %.2f"), "actual_settlement": st.column_config.NumberColumn("Actual", format="₹ %.2f"), "confidence": st.column_config.ProgressColumn("Rule confidence", min_value=0, max_value=1, format="percent")})
+        st.dataframe(display[["status", "order_id", "payment_id", "settlement_id", "currency", "primary_classification", "order_amount", "expected_settlement", "actual_settlement", "reason", "confidence"]], width="stretch", height=340, hide_index=True,
+                     column_config={"currency": st.column_config.TextColumn("Currency"), "order_amount": st.column_config.NumberColumn("Order amount", format="%.2f"), "expected_settlement": st.column_config.NumberColumn("Expected", format="%.2f"), "actual_settlement": st.column_config.NumberColumn("Actual", format="%.2f"), "confidence": st.column_config.ProgressColumn("Rule confidence", min_value=0, max_value=1, format="percent")})
         st.download_button("Export filtered results", csv_bytes(filtered), "filtered_reconciliation.csv", "text/csv")
         if not filtered.empty:
             selected_order = st.selectbox("Inspect transaction", filtered.order_id.tolist(), format_func=lambda value: f"{value} · {filtered.loc[filtered.order_id == value, 'primary_classification'].iloc[0].replace('_', ' ').title()}")
@@ -365,7 +392,7 @@ elif navigation == "⚠ Exceptions":
                     st.write(outcome["explanation"]); st.caption(outcome["financial_impact"])
                 with action_col:
                     st.markdown("**Safe recommended action**"); st.info(outcome["recommended_action"])
-                if not outcome["ai_available"]: st.warning("Gemini is unavailable. Reconciliation remains fully operational using deterministic evidence.")
+                if not outcome["ai_available"]: st.warning("No AI provider is configured. Reconciliation remains fully operational using deterministic evidence.")
 
 
 elif navigation == "⌁ Analytics":
@@ -378,19 +405,21 @@ elif navigation == "⌁ Analytics":
         metric_grid([
             {"label": "Match rate", "value": f'{metrics["match_rate"]:.1%}', "note": f'{metrics["matched_records"]} verified records', "icon": "✓", "tone": "success"},
             {"label": "Exception rate", "value": f'{metrics["exception_rate"]:.1%}', "note": f'{metrics["unresolved_count"]} unresolved records', "icon": "!", "tone": "warning"},
-            {"label": "Affected amount", "value": f'₹{metrics["affected_amount"]:,.0f}', "note": "Value associated with exceptions", "icon": "₹", "tone": "critical"},
+            {"label": "Affected amount", "value": format_breakdown(metrics["affected_amounts_by_currency"], compact=True), "note": "Value associated with exceptions", "icon": "¤", "tone": "critical"},
             {"label": "Throughput", "value": f'{throughput:,.0f}/s', "note": f'{duration:.3f}s deterministic runtime', "icon": "↯", "tone": "info"},
             {"label": "Accuracy", "value": "Unavailable" if metrics["classification_accuracy"] is None else f'{metrics["classification_accuracy"]:.1%}', "note": metrics["evaluation_message"], "icon": "◎", "tone": "review"},
         ])
         counts = results.primary_classification.value_counts().rename_axis("classification").reset_index(name="count")
-        affected = results[results.primary_classification != "MATCHED"].groupby("primary_classification", as_index=False).order_amount.sum()
+        affected = (results[results.primary_classification != "MATCHED"]
+                    .groupby(["primary_classification", "currency"], as_index=False)
+                    .order_amount.sum())
         methods = st.session_state.frames["payments"].payment_method.value_counts().rename_axis("payment_method").reset_index(name="count")
         delays = st.session_state.frames["payments"].merge(st.session_state.frames["settlements"], on="payment_id", how="inner")
         delays["settlement_delay_days"] = (pd.to_datetime(delays.settlement_date, errors="coerce") - pd.to_datetime(delays.payment_date, errors="coerce")).dt.total_seconds() / 86400
         delays = delays[delays.settlement_delay_days.notna() & delays.settlement_delay_days.ge(0)]
         chart_left, chart_right = st.columns(2)
         with chart_left: st.plotly_chart(style_chart(px.bar(counts, x="classification", y="count", color="classification", title="Exceptions by category")), width="stretch")
-        with chart_right: st.plotly_chart(style_chart(px.bar(affected, x="primary_classification", y="order_amount", color="primary_classification", title="Affected amount by category", labels={"order_amount": "Amount (₹)"})), width="stretch")
+        with chart_right: st.plotly_chart(style_chart(px.bar(affected, x="primary_classification", y="order_amount", color="currency", barmode="group", title="Affected amount by category and currency", labels={"order_amount": "Amount (source currency)", "currency": "Currency"})), width="stretch")
         chart_left, chart_right = st.columns(2)
         with chart_left: st.plotly_chart(style_chart(px.bar(methods, x="payment_method", y="count", color="payment_method", title="Payment-method distribution")), width="stretch")
         with chart_right: st.plotly_chart(style_chart(px.histogram(delays, x="settlement_delay_days", title="Settlement-delay distribution", labels={"settlement_delay_days": "Delay (days)"})), width="stretch")

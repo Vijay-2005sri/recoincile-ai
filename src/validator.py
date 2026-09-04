@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 import pandas as pd
+from .currency import has_valid_precision, is_supported_currency, normalise_currency
 
 
 SCHEMAS = {
@@ -74,7 +75,11 @@ def validate_dataset(df: pd.DataFrame, kind: str) -> ValidationReport:
             elif value < 0 or (col in {"order_amount", "paid_amount", "settled_amount"} and value <= 0): errors.append(f"{col} has invalid value")
         if pd.isna(pd.to_datetime(row[date_col], errors="coerce")): errors.append(f"Invalid {date_col}")
         if str(row[status_col]).lower() not in valid_statuses: errors.append(f"Unrecognized {status_col}")
-        if str(row["currency"]).upper() not in {"INR", "USD"}: errors.append("Unrecognized currency")
+        currency = normalise_currency(row["currency"])
+        if not is_supported_currency(currency):
+            errors.append("Unrecognized currency")
+        elif any(not pd.isna(pd.to_numeric(pd.Series([row[col]]), errors="coerce")).iloc[0] and not has_valid_precision(row[col], currency) for col in amount_cols):
+            errors.append(f"Amount exceeds {currency} decimal precision")
         if errors: report.row_errors[int(idx)] = errors
     return report
 

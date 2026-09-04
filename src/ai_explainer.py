@@ -36,22 +36,35 @@ def _validate_response(parsed: object) -> dict:
     return {key: parsed[key].strip()[:1500] for key in required}
 
 
+def _is_configured(key: str | None) -> bool:
+    return bool(key and key != "replace_with_your_own_key")
+
+
+def _prompt(result: dict) -> str:
+    return ("Return only a JSON object with explanation, financial_impact, and recommended_action. "
+            "Use only this structured reconciliation result. Explain the exception, state its supplied financial impact, "
+            "and recommend a safe human verification step. Never alter the classification, invent facts, move money, "
+            "or claim an action was completed. Context: " + json.dumps(result, default=str))
+
+
+def _explain_with_gemini(result: dict, key: str, client=None) -> dict:
+    from google import genai
+    from google.genai import types
+    client = client or genai.Client(api_key=key, http_options=types.HttpOptions(timeout=SETTINGS.ai_timeout_ms))
+    config = types.GenerateContentConfig(response_mime_type="application/json", response_json_schema=RESPONSE_SCHEMA,
+                                         temperature=0.1, max_output_tokens=500)
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=_prompt(result), config=config)
+    return _validate_response(json.loads(response.text))
+
+
 def explain(result: dict, client=None) -> dict:
-    key = os.getenv("GEMINI_API_KEY")
-    if client is None and (not key or key == "replace_with_your_own_key"): return fallback_explanation(result, "missing_key")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if client is None and not _is_configured(gemini_key):
+        return fallback_explanation(result, "missing_key")
     try:
-        from google import genai
-        from google.genai import types
-        client = client or genai.Client(api_key=key, http_options=types.HttpOptions(timeout=SETTINGS.ai_timeout_ms))
         allowed = {c.value for c in Classification}
         if result.get("primary_classification") not in allowed: return fallback_explanation(result, "invalid_classification")
-        prompt = ("Use only this structured reconciliation result. Explain the exception, state its supplied financial impact, "
-                  "and recommend a safe human verification step. Never alter the classification, invent facts, move money, "
-                  "or claim an action was completed. Context: " + json.dumps(result, default=str))
-        config = types.GenerateContentConfig(response_mime_type="application/json", response_json_schema=RESPONSE_SCHEMA,
-                                             temperature=0.1, max_output_tokens=500)
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt, config=config)
-        parsed = _validate_response(json.loads(response.text))
+        parsed = _explain_with_gemini(result, gemini_key, client)
         return {**parsed, "status": "ai_generated", "ai_available": True, "error_code": None,
                 "classification": result["primary_classification"]}
     except json.JSONDecodeError:

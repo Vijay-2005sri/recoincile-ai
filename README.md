@@ -18,11 +18,12 @@ Manual spreadsheet comparison is slow, error-prone, hard to reproduce, and diffi
 - Operate from a responsive fintech command centre with a compact navigation rail, live metrics, exception radar, and a local Three.js reconciliation scene with real 3D nodes, curved volume-scaled tubes, directional arrows, and moving flow particles.
 - Switch between tokenized dark and light themes; normal text and status-label pairings are checked against the WCAG AA 4.5:1 contrast threshold.
 - Validate schemas, identifiers, amounts, dates, statuses, currencies, duplicates, ordering, and orphan references.
-- Reconcile orders to payments and captured payments to settlements with a configurable ₹0.50 tolerance.
+- Reconcile orders to payments and captured payments to settlements with a configurable tolerance in the source currency.
+- Accept a curated ISO-4217 set for custom CSVs: INR, USD, EUR, GBP, AED, SGD, AUD, CAD, JPY, KWD, BHD and OMR. Currency precision is validated; summaries remain separated by currency rather than adding unlike amounts.
 - Inspect primary and secondary issues, passed and failed rules, reasons, confidence, and original source rows.
 - View batch metrics and five useful analytics views.
 - Export full results, exceptions, the current batch audit log, and a JSON summary.
-- Request a bounded Gemini explanation or use the deterministic fallback automatically.
+- Use Mistral Small for advisory, de-identified input-profile review and Gemini for bounded per-record explanations; both have deterministic fallbacks.
 
 ## 5. Architecture
 
@@ -42,7 +43,7 @@ This demonstration uses synthetic data only. It does not call Razorpay APIs, ini
 
 ## 9. Technology stack
 
-Python 3.11+, Pandas, Streamlit, Plotly, SQLite through `sqlite3`, python-dotenv, Pytest, and optional Google Gemini.
+Python 3.11+, Pandas, Streamlit, Plotly, SQLite through `sqlite3`, python-dotenv, Pytest, optional Google Gemini, and optional Mistral Small.
 
 ## 10. Installation
 
@@ -58,7 +59,7 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Replace the placeholder `GEMINI_API_KEY` only if AI explanations are wanted. Do not commit `.env`. With no key, every deterministic feature and fallback explanation still works.
+Replace `GEMINI_API_KEY` for optional explanations and `MISTRAL_API_KEY` for optional input-profile review. Do not commit `.env`. With no key, every deterministic feature and fallback explanation still works.
 
 ## 12. Generate data
 
@@ -89,7 +90,7 @@ See [docs/testing.md](docs/testing.md) for the test scope.
 
 - Orders: `order_id`, `customer_id`, `order_amount`, `currency`, `order_date`, `order_status`
 - Payments: `payment_id`, `order_id`, `paid_amount`, `currency`, `payment_status`, `payment_method`, `payment_date`
-- Settlements: `settlement_id`, `payment_id`, `settled_amount`, `fee`, `tax`, `currency`, `settlement_status`, `settlement_date`
+- Settlements: `settlement_id`, `payment_id`, `settled_amount`, `fee`, `tax`, `currency`, `settlement_status`, `settlement_date` (an FX rate is not part of this demo contract, so unlike payment and settlement currencies are retained as reviewable exceptions)
 - Ground truth: `order_id`, `expected_classification`
 
 ## 16. Exception categories
@@ -100,7 +101,7 @@ Primary precedence is invalid record, missing payment, duplicate captured paymen
 
 ## 17. Actual measured results
 
-The committed 180-record fixed-seed dataset produces 131 matches and 49 exceptions: a 72.78% match rate and 100% classification accuracy (180/180) against its separate generated ground truth. It includes four manual-review cases. Total reviewed amount is ₹1,794,381.00 and exception-associated amount is ₹482,481.00. These are reproducible synthetic-data results, not production performance claims; duration is measured live.
+The committed 180-record fixed-seed dataset produces 131 matches and 49 exceptions: a 72.78% match rate and 100% classification accuracy (180/180) against its separate generated ground truth. It includes four manual-review cases. Total reviewed amount is ₹1,794,381.00 and exception-associated amount is ₹482,481.00. These values were rechecked by the automated 180-record dry run on 4 September 2026. They are reproducible synthetic-data results, not production performance claims; duration is measured live.
 
 ## 18. Failure handling
 
@@ -108,7 +109,7 @@ Missing columns and empty files stop processing with a helpful message. Invalid 
 
 ## 19. Limitations
 
-The demo supports a focused schema, INR and USD, local single-user storage, and a rule-based settlement review threshold. It has no authentication or real payment integration. Accuracy measures agreement with intentionally generated ground truth, not performance on real merchant data.
+The demo supports a focused schema, a curated multi-currency set, local single-user storage, and a rule-based settlement review threshold. Cross-currency settlement conversion is deliberately not inferred: production reconciliation of unlike currencies requires explicit, auditable FX evidence. It has no authentication or real payment integration. Accuracy measures agreement with intentionally generated ground truth, not performance on real merchant data.
 
 ## 20. Future improvements
 

@@ -2,12 +2,26 @@ import pandas as pd
 from .exception_classifier import Classification
 
 
+def _amounts_by_currency(results: pd.DataFrame, mask: pd.Series | None = None) -> dict[str, float]:
+    if results.empty:
+        return {}
+    scoped = results if mask is None else results.loc[mask]
+    if scoped.empty:
+        return {}
+    currencies = scoped.get("currency", pd.Series("INR", index=scoped.index)).fillna("INR").astype(str).str.upper()
+    amounts = pd.to_numeric(scoped.order_amount, errors="coerce").fillna(0)
+    return {str(currency): float(amount) for currency, amount in amounts.groupby(currencies).sum().items()}
+
+
 def calculate_metrics(results: pd.DataFrame, ground_truth: pd.DataFrame | None = None, duration: float | None = None) -> dict:
     total = len(results); matched = int((results.primary_classification == "MATCHED").sum())
+    total_amounts = _amounts_by_currency(results)
+    affected_amounts = _amounts_by_currency(results, results.primary_classification != "MATCHED")
     metrics = {"total_records": total, "matched_records": matched, "exception_records": total - matched,
         "match_rate": matched / total if total else None, "exception_rate": (total - matched) / total if total else None,
         "unresolved_count": total - matched, "total_amount_reviewed": float(results.order_amount.fillna(0).sum()) if total else 0,
         "affected_amount": float(results.loc[results.primary_classification != "MATCHED", "order_amount"].fillna(0).sum()) if total else 0,
+        "total_amounts_by_currency": total_amounts, "affected_amounts_by_currency": affected_amounts,
         "processing_duration": duration, "counts_per_category": results.primary_classification.value_counts().to_dict() if total else {},
         "classification_accuracy": None, "correctly_classified": None, "per_category": {},
         "evaluation_message": "Ground truth was not provided; accuracy is unavailable."}

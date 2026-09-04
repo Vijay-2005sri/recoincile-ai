@@ -127,7 +127,7 @@ def reconcile(orders: pd.DataFrame, payments: pd.DataFrame, settlements: pd.Data
                             else: passed += ["settlement_exists", "settlement_processed", "settlement_currency", "settlement_amount", "settlement_delay"]
         secondary = _secondary_issues(order, candidates, settlements, classification, tolerance)
         rows.append({"order_id": str(order.order_id), "payment_id": payment_id, "settlement_id": settlement_id,
-            "order_amount": float(order.order_amount) if pd.notna(pd.to_numeric(order.order_amount, errors="coerce")) else None,
+            "currency": str(order.currency).upper(), "order_amount": float(order.order_amount) if pd.notna(pd.to_numeric(order.order_amount, errors="coerce")) else None,
             "paid_amount": paid, "expected_settlement": expected, "actual_settlement": actual,
             "primary_classification": classification.value, "secondary_issues": json.dumps(secondary), "reason": reason,
             "matched_fields": json.dumps(passed), "failed_checks": json.dumps(failed), "recommended_action": ACTIONS[classification],

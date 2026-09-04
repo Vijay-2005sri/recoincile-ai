@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from src.three_scene import _FRONTEND
-from src.ui import THEME_TOKENS
+from src.ui import THEME_TOKENS, data_feed_status
 
 
 def _relative_luminance(colour: str) -> float:
@@ -55,12 +55,39 @@ def test_css_rules_use_semantic_colour_variables():
     assert not direct_colour.search(scene_source)
 
 
+def test_collapsed_sidebar_releases_main_layout_width():
+    ui_source = Path("src/ui.py").read_text(encoding="utf-8")
+    assert '[data-testid="stSidebar"][aria-expanded="false"] { flex:0 0 0!important; width:0!important; min-width:0!important; max-width:0!important; }' in ui_source
+    assert '[data-testid="stAppViewContainer"]:has([data-testid="stSidebar"][aria-expanded="false"]) [data-testid="stMain"] { width:100%!important; }' in ui_source
+
+
+def test_command_centre_has_data_feed_status_panel():
+    app_source = Path("app.py").read_text(encoding="utf-8")
+    ui_source = Path("src/ui.py").read_text(encoding="utf-8")
+    assert "data_feed_status(st.session_state.data_mode, active_frames, source_ready" in app_source
+    assert 'st.button("Open Data Intake", key="command_feed_action"' in app_source
+    assert "def data_feed_status" in ui_source
+    assert callable(data_feed_status)
+
+
+def test_shared_theme_layer_defines_requested_font_roles():
+    ui_source = Path("src/ui.py").read_text(encoding="utf-8")
+    assert 'family=Inter' in ui_source
+    assert 'html,body,[class*="css"],.stApp { font-family:"Palatino Linotype",Palatino,Georgia,serif; }' in ui_source
+    assert '[data-testid="stSidebar"],[data-testid="stSidebar"] *, .rail-title,.rail-sub { font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif!important; }' in ui_source
+    assert '.stApp h1,.stApp h2,.stApp h3,.stApp h4,.stApp h5,.stApp h6,.page-title,.page-kicker,.panel-title,.command-bar,.metric-value { font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif!important; }' in ui_source
+    assert 'font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;' in ui_source
+    assert '[data-testid="stSidebar"] [data-testid="stSidebarCollapseButton"] button::after { content:"«";' in ui_source
+
+
 def test_three_scene_contains_true_webgl_flow_primitives():
     html = (_FRONTEND / "index.html").read_text(encoding="utf-8")
     script = (_FRONTEND / "scene.js").read_text(encoding="utf-8")
     for primitive in ("THREE.IcosahedronGeometry", "THREE.TubeGeometry", "THREE.CatmullRomCurve3", "THREE.PerspectiveCamera", "THREE.PointLight", "requestAnimationFrame"):
         assert primitive in script
-    assert "Tube width represents volume" in html
-    for stage in ("Payment failed", "AI diagnosis", "Risk classification", "Recovery strategy", "Recovery action", "Recovered / escalated / stopped"):
+    assert "Tube width shows actual record volume" in html
+    for stage in ("Input data", "Schema validation", "Deterministic matching", "Matched records", "Exception queue", "Audit trail"):
         assert stage in script
+    for interaction in ("pointerdown", "pointermove", "sessionStorage", "dblclick"):
+        assert interaction in script
     assert (_FRONTEND / "vendor" / "three.module.min.js").is_file()

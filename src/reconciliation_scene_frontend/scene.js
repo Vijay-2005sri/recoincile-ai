@@ -11,6 +11,7 @@ const targetOrigin = parentUrl ? new URL(parentUrl).origin : "*";
 let cleanupScene = () => {};
 let mountGeneration = 0;
 let lastReportedHeight = 0;
+const LABEL_LAYOUT_STORAGE = "reconcile-ai-flow-label-layout-v1";
 
 function post(type, payload = {}) {
   window.parent.postMessage({ isStreamlitMessage: true, type, ...payload }, targetOrigin);
@@ -32,17 +33,90 @@ function colour(token) {
   return getComputedStyle(root).getPropertyValue(`--${token}`).trim();
 }
 
-function addLabel(labels, position, radius, title, subtitle, tone) {
+function loadLabelLayout() {
+  try {
+    return JSON.parse(sessionStorage.getItem(LABEL_LAYOUT_STORAGE) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveLabelOffset(id, offset) {
+  try {
+    const layout = loadLabelLayout();
+    layout[id] = { x: offset.x, y: offset.y };
+    sessionStorage.setItem(LABEL_LAYOUT_STORAGE, JSON.stringify(layout));
+  } catch {
+    // Dragging still works if browser storage is disabled.
+  }
+}
+
+function addLabel(labels, id, position, radius, title, subtitle, tone, labelOffset = null) {
   const label = document.createElement("div");
   const titleElement = document.createElement("strong");
   const subtitleElement = document.createElement("span");
   label.className = "scene-label";
   label.dataset.tone = tone;
+  label.dataset.labelId = id;
+  label.setAttribute("role", "button");
+  label.setAttribute("aria-label", `Drag ${title} label`);
+  label.title = "Drag to reposition. Double-click to reset.";
   titleElement.textContent = title;
   subtitleElement.textContent = subtitle;
   label.append(titleElement, subtitleElement);
   view.appendChild(label);
-  labels.push({ label, position: position.clone(), offset: new THREE.Vector3(0, radius + .52, 0) });
+  const savedOffset = loadLabelLayout()[id] || {};
+  const item = {
+    id,
+    label,
+    position: position.clone(),
+    offset: labelOffset || new THREE.Vector3(0, radius + .52, 0),
+    userOffset: new THREE.Vector2(Number(savedOffset.x) || 0, Number(savedOffset.y) || 0),
+    baseX: 0,
+    baseY: 0,
+    dragging: false,
+  };
+  let startX = 0;
+  let startY = 0;
+  let originX = 0;
+  let originY = 0;
+
+  const clampOffset = (x, y) => {
+    const halfWidth = label.offsetWidth / 2;
+    const halfHeight = label.offsetHeight / 2;
+    return new THREE.Vector2(
+      Math.max(halfWidth - item.baseX, Math.min(view.clientWidth - halfWidth - item.baseX, x)),
+      Math.max(halfHeight - item.baseY, Math.min(view.clientHeight - halfHeight - item.baseY, y)),
+    );
+  };
+  label.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    item.dragging = true;
+    startX = event.clientX;
+    startY = event.clientY;
+    originX = item.userOffset.x;
+    originY = item.userOffset.y;
+    label.setPointerCapture(event.pointerId);
+    label.classList.add("is-dragging");
+  });
+  label.addEventListener("pointermove", (event) => {
+    if (!item.dragging) return;
+    item.userOffset.copy(clampOffset(originX + event.clientX - startX, originY + event.clientY - startY));
+  });
+  const finishDrag = (event) => {
+    if (!item.dragging) return;
+    item.dragging = false;
+    label.classList.remove("is-dragging");
+    if (label.hasPointerCapture(event.pointerId)) label.releasePointerCapture(event.pointerId);
+    saveLabelOffset(item.id, item.userOffset);
+  };
+  label.addEventListener("pointerup", finishDrag);
+  label.addEventListener("pointercancel", finishDrag);
+  label.addEventListener("dblclick", () => {
+    item.userOffset.set(0, 0);
+    saveLabelOffset(item.id, item.userOffset);
+  });
+  labels.push(item);
 }
 
 function disposeObject(object) {
@@ -106,35 +180,37 @@ function mountScene(payload, generation) {
     grid.material.opacity = .36;
     world.add(grid);
 
-    const volume = Math.max(count("failed"), count("diagnosis"), count("risk"), count("strategy"), count("action"), count("outcome"), 1);
+    const sourceRows = count("orders") + count("payments") + count("settlements");
+    const reconciled = count("verified") + count("exceptions");
+    const volume = Math.max(sourceRows, reconciled, count("verified"), count("exceptions"), 1);
     const tubeRadius = (value) => .045 + (.13 * Math.sqrt(Math.max(value, 1) / volume));
     const labels = [];
     const nodes = [];
     const flows = [];
 
-    function addNode(id, title, subtitle, position, tone, radius, labelTone) {
+    function addNode(id, title, subtitle, position, tone, radius, labelTone, labelOffset = null) {
       const group = new THREE.Group();
       group.position.copy(position);
-      const geometry = id === "diagnosis" ? new THREE.SphereGeometry(radius, 32, 24) : new THREE.IcosahedronGeometry(radius, 2);
-      const material = new THREE.MeshStandardMaterial({ color: tone, emissive: tone, emissiveIntensity: id === "diagnosis" ? .46 : .16, metalness: .48, roughness: .28 });
+      const geometry = id === "matching" ? new THREE.SphereGeometry(radius, 32, 24) : new THREE.IcosahedronGeometry(radius, 2);
+      const material = new THREE.MeshStandardMaterial({ color: tone, emissive: tone, emissiveIntensity: id === "matching" ? .46 : .16, metalness: .48, roughness: .28 });
       const mesh = new THREE.Mesh(geometry, material);
       const halo = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.52, 24, 16), new THREE.MeshBasicMaterial({ color: tone, transparent: true, opacity: .075, depthWrite: false }));
       const ring = new THREE.Mesh(new THREE.TorusGeometry(radius * 1.27, .018, 8, 48), new THREE.MeshBasicMaterial({ color: tone, transparent: true, opacity: .72 }));
       ring.rotation.x = Math.PI / 2.35;
       group.add(mesh, halo, ring);
       world.add(group);
-      addLabel(labels, position, radius, title, subtitle, labelTone);
+      addLabel(labels, id, position, radius, title, subtitle, labelTone, labelOffset);
       nodes.push({ id, ring, mesh });
       return position;
     }
 
     const positions = {
-      failed: addNode("failed", "Payment failed", `${count("failed").toLocaleString()} detected`, new THREE.Vector3(-6.1, .2, .1), colors.critical, .66, "critical"),
-      diagnosis: addNode("diagnosis", "AI diagnosis", `${count("diagnosis").toLocaleString()} analysed`, new THREE.Vector3(-3.7, 2.05, -.7), colors.source, .83, "info"),
-      risk: addNode("risk", "Risk classification", `${count("risk").toLocaleString()} prioritised`, new THREE.Vector3(-1.15, -.55, .55), colors.warning, .72, "warning"),
-      strategy: addNode("strategy", "Recovery strategy", `${count("strategy").toLocaleString()} recommended`, new THREE.Vector3(1.35, 1.7, -.48), colors.review, .76, "review"),
-      action: addNode("action", "Recovery action", `${count("action").toLocaleString()} controlled`, new THREE.Vector3(3.8, -.45, .42), colors.source, .7, "info"),
-      outcome: addNode("outcome", "Recovered / escalated / stopped", `${count("outcome").toLocaleString()} outcomes`, new THREE.Vector3(6.1, 1.15, -.12), colors.success, .82, "success"),
+      sources: addNode("sources", "Input data", `${count("orders").toLocaleString()} orders · ${count("payments").toLocaleString()} payments · ${count("settlements").toLocaleString()} settlements`, new THREE.Vector3(-6.1, .2, .1), colors.source, .72, "info", new THREE.Vector3(-2.15, .78, .02)),
+      validation: addNode("validation", "Schema validation", `${sourceRows.toLocaleString()} source records checked`, new THREE.Vector3(-3.7, 2.05, -.7), colors.warning, .76, "warning"),
+      matching: addNode("matching", "Deterministic matching", reconciled ? `${reconciled.toLocaleString()} order decisions produced` : "Awaiting reconciliation run", new THREE.Vector3(-1.15, -.55, .55), colors.source, .82, "info", new THREE.Vector3(-.05, 1.82, .05)),
+      matched: addNode("matched", "Matched records", `${count("verified").toLocaleString()} verified end-to-end`, new THREE.Vector3(1.6, 1.85, -.48), colors.success, .74, "success"),
+      exceptions: addNode("exceptions", "Exception queue", `${count("exceptions").toLocaleString()} require review`, new THREE.Vector3(1.65, -1.55, .25), colors.critical, .74, "critical", new THREE.Vector3(.18, -1.2, 0)),
+      audit: addNode("audit", "Audit trail", reconciled ? `${reconciled.toLocaleString()} decisions recorded` : "Created after a batch completes", new THREE.Vector3(5.75, .22, -.12), colors.review, .82, "review", new THREE.Vector3(.72, 1.34, 0)),
     };
 
     function addFlow(from, to, tone, value, curveLift) {
@@ -148,7 +224,7 @@ function mountScene(payload, generation) {
       arrow.position.copy(curve.getPointAt(.72));
       arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
       world.add(tube, arrow);
-      const particles = Array.from({ length: Math.max(2, Math.min(6, Math.ceil(value / volume * 5))) }, (_, index) => {
+      const particles = Array.from({ length: payload.flowActive && value > 0 ? Math.max(2, Math.min(6, Math.ceil(value / volume * 5))) : 0 }, (_, index) => {
         const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.6, 12, 10), new THREE.MeshBasicMaterial({ color: colors.particle }));
         world.add(mesh);
         return { mesh, progress: index / 5, speed: .075 + index * .012 };
@@ -156,11 +232,12 @@ function mountScene(payload, generation) {
       flows.push({ curve, particles });
     }
 
-    addFlow(positions.failed, positions.diagnosis, colors.critical, count("failed"), .72);
-    addFlow(positions.diagnosis, positions.risk, colors.source, count("diagnosis"), -.48);
-    addFlow(positions.risk, positions.strategy, colors.warning, count("risk"), .68);
-    addFlow(positions.strategy, positions.action, colors.review, count("strategy"), -.55);
-    addFlow(positions.action, positions.outcome, colors.success, count("outcome"), .58);
+    addFlow(positions.sources, positions.validation, colors.source, sourceRows, .72);
+    addFlow(positions.validation, positions.matching, colors.warning, sourceRows, -.48);
+    addFlow(positions.matching, positions.matched, colors.success, count("verified"), .68);
+    addFlow(positions.matching, positions.exceptions, colors.critical, count("exceptions"), -.65);
+    addFlow(positions.matched, positions.audit, colors.success, count("verified"), .4);
+    addFlow(positions.exceptions, positions.audit, colors.critical, count("exceptions"), -.46);
 
     function resize() {
       const width = view.clientWidth || 1;
@@ -170,9 +247,12 @@ function mountScene(payload, generation) {
       renderer.setSize(width, height, false);
     }
     function projectLabels() {
-      labels.forEach(({ label, position, offset }) => {
+      labels.forEach((item) => {
+        const { label, position, offset, userOffset } = item;
         const projected = position.clone().add(offset).project(camera);
-        label.style.transform = `translate(${(projected.x * .5 + .5) * view.clientWidth}px, ${(-projected.y * .5 + .5) * view.clientHeight}px) translate(-50%, -50%)`;
+        item.baseX = (projected.x * .5 + .5) * view.clientWidth;
+        item.baseY = (-projected.y * .5 + .5) * view.clientHeight;
+        label.style.transform = `translate(${item.baseX + userOffset.x}px, ${item.baseY + userOffset.y}px) translate(-50%, -50%)`;
         label.style.opacity = projected.z < 1 ? "1" : "0";
       });
     }
@@ -181,14 +261,14 @@ function mountScene(payload, generation) {
     const started = performance.now();
     function render(now) {
       const elapsed = (now - started) / 1000;
-      if (payload.motionEnabled) {
+      if (payload.flowActive) {
         world.rotation.y = Math.sin(elapsed * .22) * .12;
         world.rotation.x = Math.cos(elapsed * .18) * .025;
         camera.position.x = Math.sin(elapsed * .17) * .92;
         camera.position.y = 4.6 + Math.cos(elapsed * .14) * .25;
         nodes.forEach(({ id, ring, mesh }, index) => {
           ring.rotation.z = elapsed * (.25 + index * .018);
-          if (id === "diagnosis") mesh.rotation.y = elapsed * .32;
+          if (id === "matching") mesh.rotation.y = elapsed * .32;
         });
         flows.forEach(({ curve, particles }) => particles.forEach((particle) => {
           particle.progress = (particle.progress + particle.speed / 60) % 1;
@@ -200,7 +280,7 @@ function mountScene(payload, generation) {
       camera.lookAt(0, -.08, 0);
       projectLabels();
       renderer.render(scene, camera);
-      if (payload.motionEnabled) frame = requestAnimationFrame(render);
+      if (payload.flowActive) frame = requestAnimationFrame(render);
     }
 
     const observer = new ResizeObserver(() => {
@@ -234,7 +314,8 @@ function scheduleSceneMount(payload) {
   cleanupScene();
   cleanupScene = () => {};
   applyTheme(payload.theme);
-  stateBadge.textContent = payload.processing ? "PROCESSING" : "ANALYSIS LIVE";
+  const decisions = Number(payload.counts?.verified || 0) + Number(payload.counts?.exceptions || 0);
+  stateBadge.textContent = payload.flowActive ? "LIVE BATCH FLOW" : decisions ? "BATCH COMPLETE" : "AWAITING RUN";
   loading.hidden = false;
   view.dataset.sceneState = "mounting";
 
